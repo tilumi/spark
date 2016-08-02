@@ -50,7 +50,8 @@ case class SortAggregateExec(
       AttributeSet(aggregateBufferAttributes)
 
   override private[sql] lazy val metrics = Map(
-    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"))
+    "numOutputRows" -> SQLMetrics.createMetric(sparkContext, "number of output rows"),
+    "aggTime" -> SQLMetrics.createTimingMetric(sparkContext, "aggregate time"))
 
   override def output: Seq[Attribute] = resultExpressions.map(_.toAttribute)
 
@@ -72,6 +73,7 @@ case class SortAggregateExec(
 
   protected override def doExecute(): RDD[InternalRow] = attachTree(this, "execute") {
     val numOutputRows = longMetric("numOutputRows")
+    val aggTime = longMetric("aggTime")
     child.execute().mapPartitionsInternal { iter =>
       // Because the constructor of an aggregation iterator will read at least the first row,
       // we need to get the value of iter.hasNext first.
@@ -91,7 +93,8 @@ case class SortAggregateExec(
           resultExpressions,
           (expressions, inputSchema) =>
             newMutableProjection(expressions, inputSchema, subexpressionEliminationEnabled),
-          numOutputRows)
+          numOutputRows,
+          aggTime)
         if (!hasInput && groupingExpressions.isEmpty) {
           // There is no input and there is no grouping expressions.
           // We need to output a single row as the output.

@@ -61,13 +61,24 @@ private[spark] class ResultTask[T, U](
 
   override def runTask(context: TaskContext): U = {
     // Deserialize the RDD and the func using the broadcast variables.
-    val deserializeStartTime = System.currentTimeMillis()
+    val deserializeStartTime = System.nanoTime()
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val (rdd, func) = ser.deserialize[(RDD[T], (TaskContext, Iterator[T]) => U)](
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
-    _executorDeserializeTime = System.currentTimeMillis() - deserializeStartTime
-
-    func(context, rdd.iterator(partition, context))
+    _executorDeserializeTime = System.nanoTime() - deserializeStartTime
+    // scalastyle:off
+//    println(s"deserialize time: ${_executorDeserializeTime / 1000}")
+    // scalastyle:on
+    // scalastyle:off
+//    val start = System.nanoTime()
+//    println(s"result task start")
+    val iterator =
+      rdd.iterator(partition, context)
+//    println("getIterator time: " + ((System.nanoTime() - start) / 1000))
+    val rel = func(context, iterator)
+//    println(s"result task : ${(System.nanoTime() - start) / 1000}")
+    rel
+    // scalastyle:on
   }
 
   // This is only callable on the driver side.

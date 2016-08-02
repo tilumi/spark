@@ -391,6 +391,7 @@ public final class UnsafeRow extends MutableRow implements Externalizable, KryoS
   @Override
   public double getDouble(int ordinal) {
     assertIndexIsValid(ordinal);
+
     return Platform.getDouble(baseObject, getFieldOffset(ordinal));
   }
 

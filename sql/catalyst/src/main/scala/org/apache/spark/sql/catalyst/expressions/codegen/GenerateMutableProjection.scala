@@ -52,6 +52,8 @@ object GenerateMutableProjection extends CodeGenerator[Seq[Expression], MutableP
       expressions: Seq[Expression],
       useSubexprElimination: Boolean): MutableProjection = {
     val ctx = newCodeGenContext()
+    val ioTime = "ioTime"
+    ctx.addMutableState(s"long", ioTime, s"this.$ioTime = 0L;")
     val (validExpr, index) = expressions.zipWithIndex.filter {
       case (NoOp, _) => false
       case _ => true
@@ -125,9 +127,12 @@ object GenerateMutableProjection extends CodeGenerator[Seq[Expression], MutableP
         public java.lang.Object apply(java.lang.Object _i) {
           InternalRow ${ctx.INPUT_ROW} = (InternalRow) _i;
           $evalSubexpr
+          long updateStart = System.nanoTime();
           $allProjections
           // copy all the results into MutableRow
+
           $allUpdates
+          this.$ioTime += ((System.nanoTime() - updateStart) / 1000);
           return mutableRow;
         }
       }

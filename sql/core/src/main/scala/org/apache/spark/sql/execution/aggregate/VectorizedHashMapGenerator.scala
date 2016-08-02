@@ -69,7 +69,7 @@ class VectorizedHashMapGenerator(
   }
 
   def generate(): String = {
-    s"""
+    val result = s"""
        |public class $generatedClassName {
        |${initializeAggregateHashMap()}
        |
@@ -84,6 +84,7 @@ class VectorizedHashMapGenerator(
        |${generateClose()}
        |}
      """.stripMargin
+    result
   }
 
   private def initializeAggregateHashMap(): String = {

@@ -82,6 +82,8 @@ package object expressions  {
 
     /** Uses the given row to store the output of the projection. */
     def target(row: MutableRow): MutableProjection
+
+    def getElapsedTime: Long = 0L
   }
 
 

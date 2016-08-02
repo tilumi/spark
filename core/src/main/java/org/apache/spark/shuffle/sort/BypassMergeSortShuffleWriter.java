@@ -143,13 +143,16 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     // the disk, and can take a long time in aggregate when we open many files, so should be
     // included in the shuffle write time.
     writeMetrics.incWriteTime(System.nanoTime() - openStartTime);
-
+//    System.out.println("Writer open time: " + ((System.nanoTime() - openStartTime) / 1000));
+//    long iterStart = System.nanoTime();
     while (records.hasNext()) {
       final Product2<K, V> record = records.next();
       final K key = record._1();
       partitionWriters[partitioner.getPartition(key)].write(key, record._2());
     }
 
+//    System.out.println("writer iteration time: " + ((System.nanoTime() - iterStart) / 1000));
+    long commitStart = System.nanoTime();
     for (DiskBlockObjectWriter writer : partitionWriters) {
       writer.commitAndClose();
     }
@@ -159,6 +162,7 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     partitionLengths = writePartitionedFile(tmp);
     shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
     mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
+    System.out.println("writer commit & index write time: " + ((System.nanoTime() - commitStart) / 1000));
   }
 
   @VisibleForTesting

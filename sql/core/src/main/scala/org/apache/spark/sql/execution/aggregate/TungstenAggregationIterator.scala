@@ -19,6 +19,7 @@ package org.apache.spark.sql.execution.aggregate
 
 import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
+import org.apache.spark.metrics.source.CodegenMetrics
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate._
@@ -88,7 +89,8 @@ class TungstenAggregationIterator(
     testFallbackStartsAt: Option[(Int, Int)],
     numOutputRows: SQLMetric,
     peakMemory: SQLMetric,
-    spillSize: SQLMetric)
+    spillSize: SQLMetric,
+    aggTime: SQLMetric)
   extends AggregationIterator(
     groupingExpressions,
     originalInputAttributes,
@@ -165,6 +167,8 @@ class TungstenAggregationIterator(
     TaskContext.get().taskMemoryManager().pageSizeBytes,
     false // disable tracking of performance metrics
   )
+
+
 
   // The function used to read and process input rows. When processing input rows,
   // it first uses hash-based aggregation by putting groups and their buffers in
@@ -299,6 +303,7 @@ class TungstenAggregationIterator(
   // The aggregation buffer used by the sort-based aggregation.
   private[this] val sortBasedAggregationBuffer: UnsafeRow = createNewAggregationBuffer()
 
+
   // The function used to process rows in a group
   private[this] var sortBasedProcessRow: (MutableRow, InternalRow) => Unit = null
 
@@ -352,8 +357,9 @@ class TungstenAggregationIterator(
   /**
    * Start processing input rows.
    */
+//  val start = System.nanoTime()
   processInputs(testFallbackStartsAt.getOrElse((Int.MaxValue, Int.MaxValue)))
-
+//  println(s"TungstenAggregationIterator processInputs time: ${(System.nanoTime() - start) /1000 }")
   // If we did not switch to sort-based aggregation in processInputs,
   // we pre-load the first key-value pair from the map (to make hasNext idempotent).
   if (!sortBased) {
@@ -377,6 +383,10 @@ class TungstenAggregationIterator(
 
   override final def next(): UnsafeRow = {
     if (hasNext) {
+      val start = System.nanoTime()
+      // scalastyle:off
+//      println(s"TungstenAggregationIterator: aggregation start")
+      // scalastyle:on
       val res = if (sortBased) {
         // Process the current group.
         processCurrentSortedGroup()
@@ -422,6 +432,9 @@ class TungstenAggregationIterator(
         metrics.incPeakExecutionMemory(maxMemory)
       }
       numOutputRows += 1
+      // scalastyle:off
+//      println(s"TungstenAggregationIterator: ${(System.nanoTime() - start) / 1000}")
+      // scalastyle:on
       res
     } else {
       // no more result
@@ -449,4 +462,5 @@ class TungstenAggregationIterator(
         "This method should not be called when groupingExpressions is not empty.")
     }
   }
+
 }

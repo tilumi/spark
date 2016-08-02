@@ -66,17 +66,28 @@ private[spark] class ShuffleMapTask(
 
   override def runTask(context: TaskContext): MapStatus = {
     // Deserialize the RDD using the broadcast variable.
-    val deserializeStartTime = System.currentTimeMillis()
+    val deserializeStartTime = System.nanoTime()
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val (rdd, dep) = ser.deserialize[(RDD[_], ShuffleDependency[_, _, _])](
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
-    _executorDeserializeTime = System.currentTimeMillis() - deserializeStartTime
-
+    _executorDeserializeTime = (System.nanoTime() - deserializeStartTime)/1000
+    // scalastlye:off
+//    println(s"deserialization time: ${_executorDeserializeTime}")
+    // scalastlye:on
     var writer: ShuffleWriter[Any, Any] = null
     try {
       val manager = SparkEnv.get.shuffleManager
       writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-      writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
+//      println()
+//      println(s"shuffleMap start")
+      val start = System.nanoTime()
+      val getIteratorStart = System.nanoTime()
+      val iterator =
+        rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
+//      println("getIterator time: " + ((System.nanoTime() - getIteratorStart) / 1000))
+      writer.write(iterator)
+//      println(s"ShuffleMap: ${(System.nanoTime() - start) / 1000}")
+//      println()
       writer.stop(success = true).get
     } catch {
       case e: Exception =>

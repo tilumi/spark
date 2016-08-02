@@ -944,6 +944,9 @@ object CodeGenerator extends Logging {
           CodegenMetrics.METRIC_SOURCE_CODE_SIZE.update(code.body.length)
           CodegenMetrics.METRIC_COMPILATION_TIME.update(timeMs.toLong)
           logInfo(s"Code generated in $timeMs ms")
+          // scalastyle:off
+          println(s"Code generated in ${timeMs * 1000} ")
+          // scalastyle:on
           result
         }
       })

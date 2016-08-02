@@ -17,6 +17,7 @@
 
 package org.apache.spark.sql.execution.aggregate
 
+import org.apache.spark.metrics.source.CodegenMetrics
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.aggregate.{AggregateExpression, AggregateFunction}
@@ -35,7 +36,8 @@ class SortBasedAggregationIterator(
     initialInputBufferOffset: Int,
     resultExpressions: Seq[NamedExpression],
     newMutableProjection: (Seq[Expression], Seq[Attribute]) => MutableProjection,
-    numOutputRows: SQLMetric)
+    numOutputRows: SQLMetric,
+    aggTime: SQLMetric)
   extends AggregationIterator(
     groupingExpressions,
     valueAttributes,
@@ -146,6 +148,10 @@ class SortBasedAggregationIterator(
 
   override final def next(): UnsafeRow = {
     if (hasNext) {
+      // scalastyle:off
+//      println(s"SortBasedAggregationIterator: aggregation start")
+      // scalastyle:on
+      val start = System.nanoTime()
       // Process the current group.
       processCurrentSortedGroup()
       // Generate output row for the current group.
@@ -153,11 +159,15 @@ class SortBasedAggregationIterator(
       // Initialize buffer values for the next group.
       initializeBuffer(sortBasedAggregationBuffer)
       numOutputRows += 1
+      // scalastyle:off
+//      println(s"SortBasedAggregationIterator processInputs: ${(System.nanoTime() - start) / 1000}")
+      // scalastyle:on
       outputRow
     } else {
       // no more result
       throw new NoSuchElementException
     }
+
   }
 
   def outputForEmptyGroupingKeyWithoutInput(): UnsafeRow = {

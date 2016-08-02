@@ -45,7 +45,6 @@ abstract class AggregationIterator(
   ///////////////////////////////////////////////////////////////////////////
   // Initializing functions.
   ///////////////////////////////////////////////////////////////////////////
-
   /**
    * The following combinations of AggregationMode are supported:
    * - Partial
@@ -65,6 +64,7 @@ abstract class AggregationIterator(
     require(modes.subsetOf(Set(Partial, PartialMerge)) || modes.subsetOf(Set(Final, Complete)),
       s"$aggregateExpressions can't have Partial/PartialMerge and Final/Complete in the same time.")
   }
+
 
   // Initialize all AggregateFunctions by binding references if necessary,
   // and set inputBufferOffset and mutableBufferOffset.
@@ -258,4 +258,6 @@ abstract class AggregationIterator(
       i += 1
     }
   }
+
+
 }

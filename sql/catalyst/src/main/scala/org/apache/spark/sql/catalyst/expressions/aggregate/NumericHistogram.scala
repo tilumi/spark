@@ -624,10 +624,18 @@ case class SortHistograms(left: Seq[Expression],
       """.stripMargin)
     ctx.addMutableState(s"Object[]", values, s"this.$values = null;")
     ctx.addMutableState(s"Object[]", tmpArray, s"this.$tmpArray = null;")
+    val ioTime = "ioTime"
+    val computingTime = ctx.freshName("computingTime")
+    ctx.addMutableState(s"long", computingTime, s"this.$computingTime = 0L;")
+    val rows = ctx.freshName("rows")
+    ctx.addMutableState(s"int", rows, s"this.$rows = 0;")
 
     ev.copy(code = s"""
       final boolean ${ev.isNull} = false;
-      this.$values = new Object[${children.size}];""" +
+      this.$values = new Object[${children.size}];
+      this.$rows += 1;
+      long start = System.nanoTime();
+      """ +
       ctx.splitExpressions(
         ctx.INPUT_ROW,
         children.zipWithIndex.map { case (e, i) =>
@@ -641,10 +649,19 @@ case class SortHistograms(left: Seq[Expression],
            """
         }) +
       s"""
+        $ioTime += ((System.nanoTime() - start) / 1000);
+        if($rows % 10000 == 0) {
+          System.out.println("I/O time: " + $ioTime);
+        }
+        start = System.nanoTime();
         this.$tmpArray = new Object[${children.size}];
         this.$mergeFunc($values, $tmpArray, 0, ${left.size / 2}, ${left.size / 2}, ${right.size / 2});
         $values = $trimFunc($values, $numOfBins);
         final ArrayData ${ev.value} = new $arrayClass($values);
+        $computingTime += ((System.nanoTime() - start) / 1000);
+        if($rows == 10000000 / 4) {
+          System.out.println("computingTime: " + $computingTime);
+        }
         this.$values = null;
         this.$tmpArray = null;
       """)
@@ -677,19 +694,17 @@ case class NumericHistogram(
 
   override def children: Seq[Expression] = Seq(child)
   override def nullable: Boolean = false
-  override def dataType: DataType = ArrayType(
-    StructType(Seq(
-      StructField("x", DoubleType),
-      StructField("y", DoubleType))))
+//  override def dataType: DataType = ArrayType(
+//    StructType(Seq(
+//      StructField("x", DoubleType),
+//      StructField("y", DoubleType))))
+  override def dataType: DataType = ArrayType(DoubleType)
   override def inputTypes: Seq[AbstractDataType] = Seq(DoubleType, IntegerType)
 
   val numOfBins = nb.eval(InternalRow.empty).asInstanceOf[Int]
 
   val histogram = AttributeReference("histogram",
-    ArrayType(
-      StructType(Seq(
-        StructField("x", DoubleType),
-        StructField("y", DoubleType)))))()
+    ArrayType(DoubleType))()
 
   override val aggBufferAttributes = Seq(histogram)
 
@@ -704,7 +719,7 @@ case class NumericHistogram(
   override val updateExpressions: Seq[Expression] = {
     val sortedArray =
       CombineHistograms(histogram,
-        CreateArray(Seq(CreateStruct(Seq(child, Literal(1d))))), nb)
+        CreateArray((Seq(child, Literal(1d)))), nb)
     Seq(sortedArray)
 
   }
@@ -841,78 +856,84 @@ case class CombineHistograms(left: Expression,
       s"""
          |private static void $mergeFunc(ArrayData $localLeft,
          | ArrayData $localRight,
-         | InternalRow[] $localResult)
+         | double[] $localResult)
          |{
          |  int iFirst = 0;
          |  int iSecond = 0;
          |  int iMerged = 0;
          |
-         |  while (iFirst < $localLeft.numElements() && iSecond < $localRight.numElements())
+         |  while (iFirst < ($localLeft.numElements() / 2) && iSecond < ($localRight.numElements() / 2))
          |  {
-         |    if ($localLeft.getStruct(iFirst, 2).getDouble(0) <
-         |      $localRight.getStruct(iSecond, 2).getDouble(0))
+         |    if ($localLeft.getDouble(iFirst * 2) <
+         |      $localRight.getDouble(iSecond * 2))
          |    {
-         |       $localResult[iMerged] = $localLeft.getStruct(iFirst, 2);
+         |       $localResult[iMerged * 2] = $localLeft.getDouble(iFirst * 2);
+         |       $localResult[iMerged * 2 + 1] = $localLeft.getDouble(iFirst * 2 + 1);
          |       iFirst++;
          |    }
          |    else
          |    {
-         |       $localResult[iMerged] = $localRight.getStruct(iSecond, 2);
+         |       $localResult[iMerged * 2] = $localRight.getDouble(iSecond * 2);
+         |       $localResult[iMerged * 2 + 1] = $localRight.getDouble(iSecond * 2 + 1);
          |       iSecond++;
          |    }
          |    iMerged++;
          |  }
          |  for(int $iterationIndex = iFirst;
-         |    $iterationIndex < $localLeft.numElements();
+         |    $iterationIndex < ($localLeft.numElements() / 2);
          |    $iterationIndex++) {
-         |    $localResult[iMerged + $iterationIndex - iFirst] =
-         |      $localLeft.getStruct($iterationIndex, 2);
+         |    $localResult[(iMerged + $iterationIndex - iFirst) * 2] =
+         |      $localLeft.getDouble($iterationIndex * 2);
+         |    $localResult[(iMerged + $iterationIndex - iFirst) * 2 + 1] =
+         |      $localLeft.getDouble($iterationIndex * 2 + 1);
          |  }
          |  for(int $iterationIndex = iSecond;
-         |    $iterationIndex < $localRight.numElements();
+         |    $iterationIndex < ($localRight.numElements() / 2);
          |    $iterationIndex++) {
-         |    $localResult[iMerged + $iterationIndex - iSecond] =
-         |      $localRight.getStruct($iterationIndex, 2);
+         |    $localResult[(iMerged + $iterationIndex - iSecond) * 2] =
+         |      $localRight.getDouble($iterationIndex * 2);
+         |    $localResult[(iMerged + $iterationIndex - iSecond) * 2 + 1] =
+         |      $localRight.getDouble($iterationIndex * 2 + 1);
          |  }
          |}
       """.stripMargin.trim
     )
     ctx.addNewFunction(trimFunc,
       s"""
-         | InternalRow[] $trimFunc(InternalRow[] $localArray, int limit) {
+         | double[] $trimFunc(double[] $localArray, int limit) {
          |
-         |     if($localArray.length > limit) {
-         |       InternalRow[] result = new InternalRow[$localArray.length - 1];
+         |     if($localArray.length > limit * 2) {
+         |       double[] result = new double[$localArray.length - 2];
          |       double $min = Double.MAX_VALUE;
          |       int $minIndex = 0;
          |       for (int $iterationIndex = 0;
-         |         $iterationIndex < ($localArray.length - 1);
+         |         $iterationIndex < (($localArray.length - 2) / 2);
          |         $iterationIndex++) {
-         |         if($localArray[$iterationIndex + 1].getDouble(0) -
-         |           $localArray[$iterationIndex].getDouble(0) < $min) {
-         |           $min = $localArray[$iterationIndex + 1].getDouble(0) -
-         |             $localArray[$iterationIndex].getDouble(0);
+         |         if($localArray[($iterationIndex + 1) * 2] -
+         |           $localArray[$iterationIndex * 2] < $min) {
+         |           $min = $localArray[($iterationIndex + 1) * 2] -
+         |             $localArray[$iterationIndex * 2];
          |           $minIndex = $iterationIndex;
          |         }
          |       }
          |       for(int $iterationIndex = 0;
-         |         $iterationIndex < $localArray.length;
+         |         $iterationIndex < $localArray.length / 2;
          |         $iterationIndex++) {
          |         if($iterationIndex == $minIndex) {
-         |           double $q1 = $localArray[$iterationIndex].getDouble(0);
-         |           double $k1 = $localArray[$iterationIndex].getDouble(1);
-         |           double $q2 = $localArray[$iterationIndex + 1].getDouble(0);
-         |           double $k2 = $localArray[$iterationIndex + 1].getDouble(1);
-         |           InternalRow $tmpRow =
-         |            new GenericInternalRow(
-         |              new Object[]{($q1 * $k1 + $q2 * $k2) / ($k1 + $k2), $k1 + $k2});
-         |           result[$iterationIndex] = $tmpRow;
+         |           double $q1 = $localArray[$iterationIndex * 2];
+         |           double $k1 = $localArray[$iterationIndex * 2 + 1];
+         |           double $q2 = $localArray[($iterationIndex + 1) * 2];
+         |           double $k2 = $localArray[($iterationIndex + 1) * 2 + 1];
+         |           result[$iterationIndex * 2] = ($q1 * $k1 + $q2 * $k2) / ($k1 + $k2);
+         |           result[$iterationIndex * 2 + 1] = $k1 + $k2;
          |         } else if($iterationIndex == $minIndex + 1) {
          |           continue;
          |         } else if($iterationIndex < $minIndex) {
-         |           result[$iterationIndex] = $localArray[$iterationIndex];
+         |           result[$iterationIndex * 2] = $localArray[$iterationIndex * 2];
+         |           result[$iterationIndex * 2 + 1] = $localArray[$iterationIndex * 2 + 1];
          |         } else if($iterationIndex > $minIndex) {
-         |           result[$iterationIndex - 1] = $localArray[$iterationIndex];
+         |           result[($iterationIndex - 1) * 2] = $localArray[$iterationIndex * 2];
+         |           result[($iterationIndex - 1) * 2 + 1] = $localArray[$iterationIndex * 2 + 1];
          |         }
          |     }
          |       return $trimFunc(result, limit);
@@ -922,22 +943,39 @@ case class CombineHistograms(left: Expression,
          |
          | }
       """.stripMargin)
-    ctx.addMutableState(s"InternalRow[]", values, s"this.$values = null;")
+    ctx.addMutableState(s"double[]", values, s"this.$values = null;")
+    val ioTime = "ioTime"
+
+    val computingTime = ctx.freshName("computingTime")
+    ctx.addMutableState(s"long", computingTime, s"this.$computingTime = 0L;")
+    val rows = ctx.freshName("rows")
+    ctx.addMutableState(s"int", rows, s"this.$rows = 0;")
     val leftCode = left.genCode(ctx)
     val rightCode = right.genCode(ctx)
     val numOfBins = nb.genCode(ctx)
 
     ev.copy(code = s"""
+      $rows += 1;
+      long start = System.nanoTime();
       ${leftCode.code}
+      $ioTime += ((System.nanoTime() - start) / 1000);
+      if($rows % 10000 == 0) {
+        System.out.println("I/O time: " + $ioTime);
+      }
+      start = System.nanoTime();
       ${rightCode.code}
       ${numOfBins.code}
       final boolean ${ev.isNull} = false;
-      $values = new InternalRow[${leftCode.value}.numElements() + ${rightCode.value}.numElements()];
+      $values = new double[${leftCode.value}.numElements() + ${rightCode.value}.numElements()];
       this.$mergeFunc(${leftCode.value},
         ${rightCode.value},
         $values);
       $values = $trimFunc($values, ${numOfBins.value});
       final ArrayData ${ev.value} = new $arrayClass($values);
+      $computingTime += ((System.nanoTime() - start) / 1000);
+      if($rows % 10000 == 0) {
+              System.out.println("computingTime: " + $computingTime);
+      }
       this.$values = null;
       """)
   }
