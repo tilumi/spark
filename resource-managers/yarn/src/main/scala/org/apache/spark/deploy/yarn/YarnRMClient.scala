@@ -20,7 +20,7 @@ package org.apache.spark.deploy.yarn
 import scala.collection.JavaConverters._
 
 import org.apache.hadoop.yarn.api.records._
-import org.apache.hadoop.yarn.client.api.AMRMClient
+import org.apache.hadoop.yarn.client.api.{AMRMClient, YarnClient}
 import org.apache.hadoop.yarn.client.api.AMRMClient.ContainerRequest
 import org.apache.hadoop.yarn.conf.YarnConfiguration
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils
@@ -37,6 +37,7 @@ import org.apache.spark.util.Utils
 private[spark] class YarnRMClient extends Logging {
 
   private var amClient: AMRMClient[ContainerRequest] = _
+  private var yarnClient: YarnClient = _
   private var uiHistoryAddress: String = _
   private var registered: Boolean = false
 
@@ -63,6 +64,9 @@ private[spark] class YarnRMClient extends Logging {
     amClient = AMRMClient.createAMRMClient()
     amClient.init(conf)
     amClient.start()
+    yarnClient = YarnClient.createYarnClient()
+    yarnClient.init(conf)
+    yarnClient.start()
     this.uiHistoryAddress = uiHistoryAddress
 
     val trackingUrl = uiAddress.getOrElse {
@@ -115,6 +119,10 @@ private[spark] class YarnRMClient extends Logging {
       case Some(x) => if (x <= yarnMaxAttempts) x else yarnMaxAttempts
       case None => yarnMaxAttempts
     }
+  }
+
+  def getApplicationAttempts(applicationId: ApplicationId): List[ApplicationAttemptReport] = {
+    yarnClient.getApplicationAttempts(applicationId).asScala.toList
   }
 
 }

@@ -275,7 +275,10 @@ private[spark] class ApplicationMaster(args: ApplicationMasterArguments) extends
       val priority = ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY - 1
       ShutdownHookManager.addShutdownHook(priority) { () =>
         val maxAppAttempts = client.getMaxRegAttempts(sparkConf, yarnConf)
-        val isLastAttempt = client.getAttemptId().getAttemptId() >= maxAppAttempts
+        val end = System.currentTimeMillis()
+        val isLastAttempt = client.
+          getApplicationAttempts(appAttemptId.getApplicationId).
+          size >= maxAppAttempts
 
         if (!finished) {
           // The default state of ApplicationMaster is failed if it is invoked by shut down hook.
