@@ -278,7 +278,7 @@ private[spark] class ApplicationMaster(args: ApplicationMasterArguments) extends
         val end = System.currentTimeMillis()
         val isLastAttempt = client.
           getApplicationAttempts(appAttemptId.getApplicationId).
-          size >= maxAppAttempts
+          size >= 10
 
         if (!finished) {
           // The default state of ApplicationMaster is failed if it is invoked by shut down hook.
